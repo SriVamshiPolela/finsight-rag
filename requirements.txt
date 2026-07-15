@@ -9,7 +9,7 @@ python-dotenv>=1.0
 # Phase 2 - embeddings & vector store
 sentence-transformers>=3.0
 faiss-cpu>=1.8
-pinecone-client>=5.0
+pinecone>=5.0
 mlflow>=2.14
 
 # Phase 3 - multi-agent orchestration

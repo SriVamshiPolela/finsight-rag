@@ -5,10 +5,13 @@ venv/
 .env
 data/raw/*
 data/processed/*
+data/indexes/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/indexes/.gitkeep
 mlruns/
 mlartifacts/
+mlflow.db
 *.faiss
 .pytest_cache/
 .ruff_cache/
