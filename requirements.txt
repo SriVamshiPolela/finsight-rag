@@ -13,10 +13,12 @@ pinecone>=5.0
 mlflow>=2.14
 
 # Phase 3 - multi-agent orchestration
-langchain>=0.2
-langgraph>=0.1
-llama-index>=0.10
+# (langchain itself is used via langchain-text-splitters above; llama-index
+# was evaluated but not needed since raw parsing + those splitters sufficed
+# for Phase 1 - see README)
+langgraph>=0.2
 anthropic>=0.30
+openai>=1.30
 
 # Phase 4 - evaluation
 ragas>=0.1

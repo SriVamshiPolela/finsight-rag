@@ -82,3 +82,22 @@ EVAL_TOP_K = 5
 # backend into maintenance mode with no further feature updates
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 MLFLOW_EXPERIMENT_NAME = "finsight-embedding-benchmark"
+
+# --- Phase 3: LLM providers & multi-agent routing ---
+
+# Picked in the Phase 2 benchmark (higher hit_rate@5 and MRR than bge-small)
+PRODUCTION_EMBEDDING_MODEL = "e5-small"
+# FAISSVectorStore has no native metadata filter, so the Retriever over-fetches
+# this many nearest neighbors and filters by ticker/section client-side. Fine
+# at ~3.6k chunks; would need real filtered search (or per-ticker indexes) at scale.
+RETRIEVAL_CANDIDATE_POOL = 500
+RETRIEVAL_TOP_K = 5
+
+# "anthropic" (primary) or "openai" (vendor-abstraction swap demo)
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+ROUTING_LOG_PATH = PROCESSED_DIR / "routing_log.jsonl"
