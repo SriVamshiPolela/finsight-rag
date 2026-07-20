@@ -101,3 +101,9 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 ROUTING_LOG_PATH = PROCESSED_DIR / "routing_log.jsonl"
+
+# --- Phase 4: agent evaluation (routing accuracy + RAGAS-methodology metrics) ---
+
+MLFLOW_AGENT_EVAL_EXPERIMENT_NAME = "finsight-agent-evaluation"
+AGENT_EVAL_RESULTS_PATH = PROCESSED_DIR / "agent_eval_results.json"
+RETRIEVAL_CHECK_RESULTS_PATH = PROCESSED_DIR / "agent_retrieval_check.json"

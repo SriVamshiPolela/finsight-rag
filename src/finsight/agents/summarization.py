@@ -17,4 +17,9 @@ def answer_summarization(llm: LLMProvider, ticker: str, section_key: str) -> Age
     user_message = f"Filing section excerpts:\n{format_context(chunks)}\n\nWrite the executive summary."
 
     response = llm.complete(system=SYSTEM_PROMPT, messages=[{"role": "user", "content": user_message}])
-    return AgentResponse(agent="summarization", answer=response.text, citations=chunks_to_citations(chunks))
+    return AgentResponse(
+        agent="summarization",
+        answer=response.text,
+        citations=chunks_to_citations(chunks),
+        contexts=[c["text"] for c in chunks],
+    )

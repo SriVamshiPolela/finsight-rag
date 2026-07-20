@@ -21,8 +21,13 @@ anthropic>=0.30
 openai>=1.30
 
 # Phase 4 - evaluation
-ragas>=0.1
-datasets>=2.20
+# ragas was evaluated but dropped: it unconditionally imports a deprecated
+# langchain_community.chat_models.vertexai shim that no longer ships in
+# current langchain-community, and pinning an old enough langchain-community
+# to get it back breaks LangGraph 1.x's langchain-core requirement. The four
+# RAGAS metrics (faithfulness, answer relevancy, context precision/recall)
+# are implemented natively against our own LLMProvider instead - see
+# src/finsight/eval/ragas_metrics.py and the README for the full tradeoff.
 
 # Phase 5 - API
 fastapi>=0.111

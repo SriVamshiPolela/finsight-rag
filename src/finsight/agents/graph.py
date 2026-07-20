@@ -21,6 +21,7 @@ from finsight.agents.filing_qa import answer_filing_qa
 from finsight.agents.risk_flag import answer_risk_flag
 from finsight.agents.router_tools import ROUTER_AGENT_NAMES, ROUTER_SYSTEM_PROMPT, ROUTER_TOOLS
 from finsight.agents.summarization import answer_summarization
+from finsight.agents.types import AgentResponse
 from finsight.config import ROUTING_LOG_PATH
 from finsight.llm.base import LLMProvider
 from finsight.retrieval.retriever import Retriever
@@ -34,6 +35,15 @@ class AgentState(TypedDict, total=False):
     args: dict[str, Any]
     answer: str
     citations: list[dict[str, Any]]
+    contexts: list[str]
+
+
+def _result_to_state(result: AgentResponse) -> dict[str, Any]:
+    return {
+        "answer": result.answer,
+        "citations": [asdict(c) for c in result.citations],
+        "contexts": result.contexts,
+    }
 
 
 def log_routing_decision(log_path: Path, query: str, agent: str, args: dict[str, Any]) -> None:
@@ -72,32 +82,28 @@ def _router_node(llm: LLMProvider, log_path: Path):
 
 def _filing_qa_node(llm: LLMProvider, retriever: Retriever):
     def node(state: AgentState) -> dict[str, Any]:
-        result = answer_filing_qa(llm, retriever, **state["args"])
-        return {"answer": result.answer, "citations": [asdict(c) for c in result.citations]}
+        return _result_to_state(answer_filing_qa(llm, retriever, **state["args"]))
 
     return node
 
 
 def _comparison_node(llm: LLMProvider, retriever: Retriever):
     def node(state: AgentState) -> dict[str, Any]:
-        result = answer_comparison(llm, retriever, **state["args"])
-        return {"answer": result.answer, "citations": [asdict(c) for c in result.citations]}
+        return _result_to_state(answer_comparison(llm, retriever, **state["args"]))
 
     return node
 
 
 def _risk_flag_node(llm: LLMProvider, retriever: Retriever):
     def node(state: AgentState) -> dict[str, Any]:
-        result = answer_risk_flag(llm, retriever, **state["args"])
-        return {"answer": result.answer, "citations": [asdict(c) for c in result.citations]}
+        return _result_to_state(answer_risk_flag(llm, retriever, **state["args"]))
 
     return node
 
 
 def _summarization_node(llm: LLMProvider):
     def node(state: AgentState) -> dict[str, Any]:
-        result = answer_summarization(llm, **state["args"])
-        return {"answer": result.answer, "citations": [asdict(c) for c in result.citations]}
+        return _result_to_state(answer_summarization(llm, **state["args"]))
 
     return node
 

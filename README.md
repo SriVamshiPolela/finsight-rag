@@ -3,8 +3,8 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phase 3 of 6 code-complete (multi-agent orchestration — data
-layer verified live, LLM generation pending an API key). See
+**Status:** Phase 4 of 6 code-complete (evaluation framework — retrieval half
+verified live, LLM-judged half pending an API key, same as Phase 3). See
 [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
 for the full build spec and phase plan.
 
@@ -196,8 +196,81 @@ agent functions (mocked LLM + retriever, asserting correct retrieval calls
 and citation building), and the LangGraph wiring itself — routing dispatch,
 decision logging, and the no-tool-call error path.
 
+## Phase 4 — Evaluation framework (code-complete, retrieval half verified live)
+
+A 24-case hand-labeled eval set ([agent_cases.py](src/finsight/eval/agent_cases.py)),
+6 cases per specialist agent, covering all 8 ingested companies. Every
+`expected_answer` and keyword set is grounded in real excerpts pulled live
+from the indexed corpus while building the set — not guessed at (one case's
+keywords were initially wrong for exactly this reason: see below).
+
+**Two things get measured per case, once an LLM key exists:**
+1. **Routing accuracy** — does the router pick the case's labeled `agent`? ([routing_eval.py](src/finsight/eval/routing_eval.py))
+2. **RAGAS-methodology metrics** — faithfulness, answer relevancy, context precision, context recall ([ragas_metrics.py](src/finsight/eval/ragas_metrics.py))
+
+### Why not the `ragas` package
+
+`ragas` was the spec's stated choice and was actually installed and tried
+first. It broke on import: `ragas.llms.base` unconditionally imports a
+deprecated `langchain_community.chat_models.vertexai` shim that current
+`langchain-community` no longer ships. Pinning an old enough
+`langchain-community` to get the shim back drags `langchain-core` below
+what LangGraph 1.x requires — which **broke Phase 3** the first time this
+was tried (caught immediately by rerunning the test suite, then reverted).
+
+Rather than fight that conflict, the four RAGAS metrics are implemented
+natively against the same `LLMProvider` abstraction Phase 3 already built:
+each metric is one LLM call with a `submit_score` tool (0.0-1.0), reusing
+the router's tool-calling infrastructure instead of parsing free-text
+scores. This sidesteps the conflict entirely and stays consistent with the
+project's existing vendor-abstraction pattern. **TruLens** was the
+spec-requested alternative to note: it leans toward live tracing /
+feedback-function instrumentation inside a running app, which fits
+production observability better than the batch, dataset-style evaluation
+this project needed (matching the Phase 2 benchmark's methodology).
+
+### What's verified live vs. pending a key
+
+**The retrieval half is real and verified live right now** —
+`scripts/run_agent_retrieval_check.py` runs the exact retrieval each
+specialist agent would use for all 24 cases (no LLM involved) and checks
+the expected keywords actually show up: **24/24 (100%) hit rate.** One case
+initially failed this check — `cmp-aapl-msft-cybersecurity` was labeled
+with keywords `("apple", "microsoft")`, but 10-K body text refers to the
+filer as "the Company," not by name, so the literal company-name keywords
+never matched even though the retrieved content was clearly correct. Fixed
+by rechecking the actual retrieved text and relabeling with keywords
+grounded in it (`"data security"`, `"outages"`) — a small, real example of
+why the eval set was built by inspecting live retrieval output rather than
+guessing content.
+
+**Routing accuracy and the four RAGAS-methodology metrics are code-complete
+and unit-tested (25 new tests) against mocked LLM responses, not yet run
+against a live model** — same blocker as Phase 3, no `ANTHROPIC_API_KEY`
+provisioned yet. `scripts/run_agent_eval.py` runs the whole thing for real
+the moment one is added.
+
+### Run it
+
+```bash
+# Works right now, no API key needed
+python scripts/run_agent_retrieval_check.py
+
+# Needs ANTHROPIC_API_KEY in .env
+python scripts/run_agent_eval.py
+```
+
+### Tests
+
+81 tests total (25 new): the eval-case set's own shape/schema sanity
+checks, the 4 RAGAS-methodology metric functions (mocked LLM judge,
+including the empty-context and no-tool-call-returned edge cases), the
+routing-accuracy evaluator, the full combined eval orchestration
+(single-graph-invoke-per-case, aggregate averaging, routing-correctness
+flagging), and the retrieval-check dispatch logic for all 4 agent types
+(synthetic FAISS store, monkeypatched corpus lookup for summarization).
+
 ## Coming next
 
-- **Phase 4** — RAGAS evaluation framework (will also validate routing accuracy using the logs above)
 - **Phase 5** — FastAPI + Docker + AWS deployment
 - **Phase 6** — full docs, CI/CD, demo script

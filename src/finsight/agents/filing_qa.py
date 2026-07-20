@@ -15,4 +15,9 @@ def answer_filing_qa(llm: LLMProvider, retriever: Retriever, ticker: str, questi
     user_message = f"Filing excerpts:\n{format_context(chunks)}\n\nQuestion: {question}"
 
     response = llm.complete(system=SYSTEM_PROMPT, messages=[{"role": "user", "content": user_message}])
-    return AgentResponse(agent="filing_qa", answer=response.text, citations=chunks_to_citations(chunks))
+    return AgentResponse(
+        agent="filing_qa",
+        answer=response.text,
+        citations=chunks_to_citations(chunks),
+        contexts=[c["text"] for c in chunks],
+    )

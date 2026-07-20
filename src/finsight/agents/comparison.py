@@ -19,4 +19,9 @@ def answer_comparison(llm: LLMProvider, retriever: Retriever, tickers: list[str]
     user_message = f"Filing excerpts:\n{format_context(chunks)}\n\nCompare: {topic}"
 
     response = llm.complete(system=SYSTEM_PROMPT, messages=[{"role": "user", "content": user_message}])
-    return AgentResponse(agent="comparison", answer=response.text, citations=chunks_to_citations(chunks))
+    return AgentResponse(
+        agent="comparison",
+        answer=response.text,
+        citations=chunks_to_citations(chunks),
+        contexts=[c["text"] for c in chunks],
+    )

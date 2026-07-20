@@ -16,6 +16,11 @@ class AgentResponse:
     agent: str
     answer: str
     citations: list[Citation]
+    # Raw retrieved chunk text, distinct from `citations` (deduped source
+    # metadata) — needed by Phase 4's faithfulness/context-precision/recall
+    # evaluation, which compares the answer against what was actually
+    # retrieved, not just where it came from.
+    contexts: list[str]
 
 
 def format_context(chunks: list[dict]) -> str:

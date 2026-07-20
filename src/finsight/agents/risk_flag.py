@@ -22,4 +22,9 @@ def answer_risk_flag(llm: LLMProvider, retriever: Retriever, ticker: str) -> Age
     user_message = f"Risk Factors excerpts for {ticker}:\n{format_context(chunks)}"
 
     response = llm.complete(system=SYSTEM_PROMPT, messages=[{"role": "user", "content": user_message}])
-    return AgentResponse(agent="risk_flag", answer=response.text, citations=chunks_to_citations(chunks))
+    return AgentResponse(
+        agent="risk_flag",
+        answer=response.text,
+        citations=chunks_to_citations(chunks),
+        contexts=[c["text"] for c in chunks],
+    )
