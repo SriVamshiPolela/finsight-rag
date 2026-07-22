@@ -29,9 +29,10 @@ openai>=1.30
 # are implemented natively against our own LLMProvider instead - see
 # src/finsight/eval/ragas_metrics.py and the README for the full tradeoff.
 
-# Phase 5 - API
+# Phase 5 - API + deployment
 fastapi>=0.111
 uvicorn[standard]>=0.30
+mangum>=0.17
 
 # Phase 6 - testing / CI
 pytest>=8.2
