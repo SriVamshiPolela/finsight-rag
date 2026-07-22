@@ -36,6 +36,7 @@ RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 INDEXES_DIR = DATA_DIR / "indexes"
 CHUNKS_PATH = PROCESSED_DIR / "chunks.jsonl"
+MANIFEST_PATH = PROCESSED_DIR / "manifest.json"
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150
@@ -100,7 +101,9 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
-ROUTING_LOG_PATH = PROCESSED_DIR / "routing_log.jsonl"
+# Overridable because Lambda's filesystem is read-only outside /tmp - the
+# Lambda deployment sets ROUTING_LOG_PATH=/tmp/routing_log.jsonl.
+ROUTING_LOG_PATH = Path(os.environ.get("ROUTING_LOG_PATH", str(PROCESSED_DIR / "routing_log.jsonl")))
 
 # --- Phase 4: agent evaluation (routing accuracy + RAGAS-methodology metrics) ---
 
