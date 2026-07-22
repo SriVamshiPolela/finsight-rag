@@ -3,8 +3,10 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phase 3 of 6 code-complete (multi-agent orchestration — data
-layer verified live, LLM generation pending an API key). See
+**Status:** Phase 5 of 6 done — **live and reachable at
+https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/health**
+(deployed to AWS Lambda; `/query` and `/compare` will 503 until an
+`ANTHROPIC_API_KEY` is added — see below). See
 [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
 for the full build spec and phase plan.
 
@@ -100,12 +102,14 @@ query wide, so this is a soft pick, not a landslide — noted honestly rather
 than overstated.
 
 **Vector store:** FAISS (`IndexFlatIP` over L2-normalized vectors = cosine
-similarity) is the only path actually exercised — exact search is fine at
-~3,600 chunks. Pinecone is fully implemented behind the same `VectorStore`
-interface ([pinecone_store.py](src/finsight/vectorstore/pinecone_store.py))
-and unit-tested against a mocked client, but not run against a live index —
-no Pinecone API key is provisioned yet. Swap via `VECTOR_STORE=pinecone` in
-`.env` once one is.
+similarity) is the dev default — exact search is fine at ~3,600 chunks.
+Pinecone ([pinecone_store.py](src/finsight/vectorstore/pinecone_store.py))
+is the "production" path behind the same `VectorStore` interface, unit-tested
+against a mocked client from the start, and **since verified live**: all
+3,616 chunks were embedded (e5-small) and upserted to a real serverless
+Pinecone index, and a live query for "Apple's main supply chain risks"
+correctly surfaced Apple's actual Risk Factors language (same result
+quality as the FAISS path). Swap via `VECTOR_STORE=pinecone` in `.env`.
 
 ### Run it
 
@@ -196,8 +200,154 @@ agent functions (mocked LLM + retriever, asserting correct retrieval calls
 and citation building), and the LangGraph wiring itself — routing dispatch,
 decision logging, and the no-tool-call error path.
 
+## Phase 4 — Evaluation framework (code-complete, retrieval half verified live)
+
+A 24-case hand-labeled eval set ([agent_cases.py](src/finsight/eval/agent_cases.py)),
+6 cases per specialist agent, covering all 8 ingested companies. Every
+`expected_answer` and keyword set is grounded in real excerpts pulled live
+from the indexed corpus while building the set — not guessed at (one case's
+keywords were initially wrong for exactly this reason: see below).
+
+**Two things get measured per case, once an LLM key exists:**
+1. **Routing accuracy** — does the router pick the case's labeled `agent`? ([routing_eval.py](src/finsight/eval/routing_eval.py))
+2. **RAGAS-methodology metrics** — faithfulness, answer relevancy, context precision, context recall ([ragas_metrics.py](src/finsight/eval/ragas_metrics.py))
+
+### Why not the `ragas` package
+
+`ragas` was the spec's stated choice and was actually installed and tried
+first. It broke on import: `ragas.llms.base` unconditionally imports a
+deprecated `langchain_community.chat_models.vertexai` shim that current
+`langchain-community` no longer ships. Pinning an old enough
+`langchain-community` to get the shim back drags `langchain-core` below
+what LangGraph 1.x requires — which **broke Phase 3** the first time this
+was tried (caught immediately by rerunning the test suite, then reverted).
+
+Rather than fight that conflict, the four RAGAS metrics are implemented
+natively against the same `LLMProvider` abstraction Phase 3 already built:
+each metric is one LLM call with a `submit_score` tool (0.0-1.0), reusing
+the router's tool-calling infrastructure instead of parsing free-text
+scores. This sidesteps the conflict entirely and stays consistent with the
+project's existing vendor-abstraction pattern. **TruLens** was the
+spec-requested alternative to note: it leans toward live tracing /
+feedback-function instrumentation inside a running app, which fits
+production observability better than the batch, dataset-style evaluation
+this project needed (matching the Phase 2 benchmark's methodology).
+
+### What's verified live vs. pending a key
+
+**The retrieval half is real and verified live right now** —
+`scripts/run_agent_retrieval_check.py` runs the exact retrieval each
+specialist agent would use for all 24 cases (no LLM involved) and checks
+the expected keywords actually show up: **24/24 (100%) hit rate.** One case
+initially failed this check — `cmp-aapl-msft-cybersecurity` was labeled
+with keywords `("apple", "microsoft")`, but 10-K body text refers to the
+filer as "the Company," not by name, so the literal company-name keywords
+never matched even though the retrieved content was clearly correct. Fixed
+by rechecking the actual retrieved text and relabeling with keywords
+grounded in it (`"data security"`, `"outages"`) — a small, real example of
+why the eval set was built by inspecting live retrieval output rather than
+guessing content.
+
+**Routing accuracy and the four RAGAS-methodology metrics are code-complete
+and unit-tested (25 new tests) against mocked LLM responses, not yet run
+against a live model** — same blocker as Phase 3, no `ANTHROPIC_API_KEY`
+provisioned yet. `scripts/run_agent_eval.py` runs the whole thing for real
+the moment one is added.
+
+### Run it
+
+```bash
+# Works right now, no API key needed
+python scripts/run_agent_retrieval_check.py
+
+# Needs ANTHROPIC_API_KEY in .env
+python scripts/run_agent_eval.py
+```
+
+### Tests
+
+81 tests total (25 new): the eval-case set's own shape/schema sanity
+checks, the 4 RAGAS-methodology metric functions (mocked LLM judge,
+including the empty-context and no-tool-call-returned edge cases), the
+routing-accuracy evaluator, the full combined eval orchestration
+(single-graph-invoke-per-case, aggregate averaging, routing-correctness
+flagging), and the retrieval-check dispatch logic for all 4 agent types
+(synthetic FAISS store, monkeypatched corpus lookup for summarization).
+
+## Phase 5 — API + deployment (done, live on AWS)
+
+FastAPI service exposing `/health`, `/filings`, `/query` (full router), and
+`/compare` (dedicated comparison endpoint — bypasses routing since the
+client already knows it wants a comparison). Containerized with Docker and
+**actually deployed and reachable**, not left as instructions:
+
+**Live endpoint:** https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/
+
+```bash
+curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/health
+curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings
+```
+
+`/query` and `/compare` return a `503` with a clear message rather than
+crashing, since no `ANTHROPIC_API_KEY` is provisioned in this deployment
+yet — same honest gap as Phases 3/4, now visible live instead of just in
+local tests.
+
+### Architecture: AWS Lambda (container image) + Function URL
+
+```mermaid
+flowchart LR
+    client[Client] -->|HTTPS| furl[Lambda Function URL]
+    furl --> lambda[Lambda: FastAPI via Mangum]
+    lambda --> faiss[(FAISS index<br/>baked into image)]
+    lambda -->|only if key set| claude[Claude API]
+```
+
+- **`Dockerfile`** — generic image (plain `python:3.12-slim` + uvicorn), for local runs or an ECS/Fargate-style deployment
+- **`Dockerfile.lambda`** — separate image on AWS's Lambda Python base, since Lambda needs its Runtime Interface Client invoking a per-event handler ([`lambda_handler.py`](src/finsight/api/lambda_handler.py) via Mangum), not a persistent server — genuinely different image shape, not just a different `CMD`
+- Both images bake in the Phase 1/2 outputs (chunk corpus, FAISS index, **and now the e5-small model weights**) at build time so the container is self-contained — no first-request download, no ingestion-on-boot
+
+### Real problems hit and fixed during this deployment
+
+Documenting these because they're the actual engineering content of this
+phase — a deploy that "just worked" would be less defensible in an
+interview than one where I can explain what broke and why:
+
+1. **8.76GB image, most of it unused.** `pip install sentence-transformers` pulled the default PyPI `torch` wheel, which bundles ~1.5GB of NVIDIA CUDA libraries this project never uses (CPU-only embeddings). Fixed by installing `torch` from the CPU-only index first (`--index-url https://download.pytorch.org/whl/cpu`) before the rest of `requirements-api.txt` — image dropped to 2.22GB.
+2. **API Gateway's hard 29-second timeout.** First deployment target was an API Gateway HTTP API in front of Lambda. Cold start (loading the embedding model) took ~40s, so API Gateway killed the request before Lambda even finished initializing — this cap applies regardless of Lambda's own configured timeout. Switched to a **Lambda Function URL**, which has no such ceiling.
+3. **Cold-start crash: read-only filesystem.** Even after fixing the timeout, the Lambda kept crashing on init with `OSError: [Errno 30] Read-only file system`. `sentence-transformers` was trying to download/verify the model from HuggingFace Hub on every cold start (only the FAISS index was baked into the image, not the model weights itself), and Lambda's default HF cache path sits under a read-only sandboxed home directory. Fixed by baking the model weights into the image at build time under a fixed `HF_HOME=/opt/hf_cache`, so no network call or write attempt happens at runtime. Cut cold start from ~40s to ~18s as a side benefit.
+4. **403 Forbidden on a correctly-configured public Function URL.** `AuthType=NONE` plus a resource policy granting `lambda:InvokeFunctionUrl` to principal `*` still returned 403 — confirmed by deleting and recreating the URL and permission from scratch (twice) with no change. Root cause: AWS changed the requirement in **October 2025** — public Function URLs now need **both** `lambda:InvokeFunctionUrl` *and* `lambda:InvokeFunction` granted in the resource policy, not just the former. Adding the second permission fixed it immediately.
+
+### Documented alternative: ECS/Fargate or SageMaker
+
+Lambda was chosen as the "lightweight path" per the spec, and it's what's
+actually live. For a "real" production deployment at higher, steadier
+traffic, the tradeoffs point elsewhere:
+
+- **ECS/Fargate** would use the plain `Dockerfile` image (already built and tested) behind an Application Load Balancer — no cold starts, no 29s/Lambda-specific constraints, better fit for sustained traffic. Steps: push the same non-Lambda image to ECR (already done), create an ECS cluster + Fargate service + target group + ALB, point DNS at the ALB. Not deployed here to keep AWS spend and moving parts minimal for a portfolio project — the container is proven to work standalone (see Phase 5 local Docker testing).
+- **SageMaker** endpoints are built for serving trained ML models (classification/regression) behind a managed, autoscaling inference endpoint — a natural fit if this project's embedding model were fine-tuned rather than used off-the-shelf. Since the embedding models here are pretrained and unmodified, a SageMaker real-time endpoint would mostly add cost and complexity over the Lambda/ECS path without a corresponding benefit; noted here as the documented alternative per the original spec rather than actually built.
+
+### Run it
+
+```bash
+# Local, no Docker
+python -m uvicorn finsight.api.app:app --reload
+
+# Local, containerized (same image logic as what's deployed)
+docker build -t finsight-rag-api:local .
+docker run -p 8000:8000 finsight-rag-api:local
+curl http://localhost:8000/health
+```
+
+### Tests
+
+90 tests total (9 new): `/health`, `/filings`, `/query`, `/compare`, request
+validation (empty query, single-ticker compare), the 503-without-LLM path
+for both LLM-dependent endpoints, and that `/compare` calls the comparison
+agent directly rather than going through the router — all against a real
+FastAPI `TestClient` with mocked LLM/retriever dependencies injected via
+`monkeypatch`, not a hand-rolled request stub.
+
 ## Coming next
 
-- **Phase 4** — RAGAS evaluation framework (will also validate routing accuracy using the logs above)
-- **Phase 5** — FastAPI + Docker + AWS deployment
 - **Phase 6** — full docs, CI/CD, demo script
