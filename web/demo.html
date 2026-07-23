@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FinSight RAG — Live Demo</title>
+<style>
+  :root {
+    --void: #0a1512; --void-raised: #0f1c17; --void-line: #223a31;
+    --day: #eef1ed; --day-raised: #f8faf7; --day-line: #d5ddd1;
+    --ink-on-void: #e7efe9; --ink-on-void-dim: #93a89c;
+    --ink-on-day: #142019; --ink-on-day-dim: #56685d;
+    --amber-dark: #e8a33d; --amber-light: #a8641a;
+    --live: #5fbf8e; --live-lt: #2f8a5e;
+    --bad: #d9694f; --bad-lt: #b8492f;
+    --mono: "SF Mono", "Cascadia Code", "Consolas", ui-monospace, "Courier New", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: var(--void); --surface: var(--void-raised); --line: var(--void-line);
+      --fg: var(--ink-on-void); --fg-dim: var(--ink-on-void-dim); --amber: var(--amber-dark);
+      --live-c: var(--live); --bad-c: var(--bad); --glow: rgba(232,163,61,.22); }
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: var(--day); --surface: var(--day-raised); --line: var(--day-line);
+      --fg: var(--ink-on-day); --fg-dim: var(--ink-on-day-dim); --amber: var(--amber-light);
+      --live-c: var(--live-lt); --bad-c: var(--bad-lt); --glow: rgba(168,100,26,.14); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--amber); }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  code, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  h1, h2 { font-family: var(--mono); font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 64px; }
+
+  header { margin-bottom: 30px; }
+  .kicker { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--live-c); margin-bottom: 16px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live-c);
+    box-shadow: 0 0 0 0 var(--glow); animation: pulse 2.4s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--glow); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  h1 { font-size: clamp(28px, 5vw, 38px); }
+  .dek { color: var(--fg-dim); font-size: 15px; margin: 12px 0 0; max-width: 56ch; }
+  .dek a { color: var(--fg-dim); text-decoration-color: var(--line); }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 26px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 6px 12px; border: 1px solid var(--line);
+    border-radius: 20px; color: var(--fg-dim); background: transparent; cursor: pointer; }
+  .chip:hover { border-color: var(--amber); color: var(--amber); }
+
+  form { display: flex; gap: 10px; margin-bottom: 22px; }
+  .ask-input { flex: 1; background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px 16px; font-family: var(--sans); font-size: 15px; color: var(--fg); }
+  .ask-input::placeholder { color: var(--fg-dim); }
+  .ask-btn { font-family: var(--mono); font-size: 13.5px; padding: 0 22px; border-radius: 4px; border: none;
+    background: var(--amber); color: var(--void); font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .ask-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .ask-btn:disabled { opacity: .55; cursor: default; }
+
+  .term { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 120px; }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
+  .term-body { padding: 22px 24px 26px; }
+  .empty-state { color: var(--fg-dim); font-family: var(--mono); font-size: 13px; padding: 8px 0; }
+  .loading { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; color: var(--fg-dim); }
+  .spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--amber);
+    animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .agent-badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11.5px;
+    padding: 4px 10px; border: 1px solid var(--amber); color: var(--amber); border-radius: 3px; margin-bottom: 16px; }
+  .answer { font-family: var(--sans); font-size: 14.5px; color: var(--fg); max-width: 68ch; }
+  .answer h3 { font-family: var(--sans); font-size: 15px; margin: 16px 0 6px; }
+  .answer h3:first-child { margin-top: 0; }
+  .answer ul { margin: 6px 0; padding-left: 20px; }
+  .answer p, .answer li { margin: 0 0 8px; }
+  .cites { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  .cites-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-dim); margin-bottom: 8px; }
+  .cite { font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); display: flex; gap: 8px; padding: 3px 0; }
+  .cite a { color: var(--fg-dim); text-decoration: none; }
+  .cite a:hover { color: var(--amber); text-decoration: underline; }
+
+  .err-box { color: var(--bad-c); font-family: var(--mono); font-size: 13px; }
+  .err-box .hint { color: var(--fg-dim); font-size: 12.5px; margin-top: 6px; }
+
+  footer { margin-top: 40px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); display: flex;
+    justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  footer a { text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker"><span class="dot"></span> Live · calls the deployed AWS Lambda directly</div>
+    <h1>FinSight RAG — Live Demo</h1>
+    <p class="dek">Ask about AAPL, MSFT, NVDA, JPM, GS, WMT, COST, or TGT. A router picks the right specialist agent
+      and answers from real 10-K filings, with citations. See the <a href="https://github.com/SriVamshiPolela/finsight-rag" target="_blank" rel="noopener">source on GitHub</a>.</p>
+  </header>
+
+  <div class="chip-row" id="examples">
+    <button class="chip" type="button" data-q="What are Apple's main supply chain risks?">Apple's supply chain risks</button>
+    <button class="chip" type="button" data-q="Summarize Costco's business section.">Summarize Costco</button>
+    <button class="chip" type="button" data-q="What are NVIDIA's key risk factors?">NVIDIA's risk factors</button>
+    <button class="chip" type="button" data-q="What is Goldman Sachs' business overview?">Goldman Sachs overview</button>
+  </div>
+
+  <form id="askForm">
+    <input class="ask-input" id="askInput" type="text" maxlength="240" autocomplete="off"
+      placeholder="Ask a question about one of the eight companies…" aria-label="Your question" />
+    <button class="ask-btn" id="askBtn" type="submit">Ask</button>
+  </form>
+
+  <div class="term">
+    <div class="term-bar"><span id="termLabel">POST /query</span></div>
+    <div class="term-body" id="output">
+      <div class="empty-state">$ waiting for a question…</div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Endpoint: <code>lambda-url.us-east-2.on.aws</code> · AWS Lambda, no auth</span>
+    <a href="https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings" target="_blank" rel="noopener">/filings</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var ENDPOINT = "https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query";
+  var form = document.getElementById("askForm");
+  var input = document.getElementById("askInput");
+  var btn = document.getElementById("askBtn");
+  var output = document.getElementById("output");
+  var termLabel = document.getElementById("termLabel");
+  var examples = document.getElementById("examples");
+
+  function clearChildren(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+  // Minimal, safe markdown-ish rendering: # / ## headings, "- " list items,
+  // **bold** spans, blank-line-separated paragraphs. No raw HTML from the
+  // API response is ever inserted - every text run goes through textContent.
+  function renderAnswer(container, text) {
+    clearChildren(container);
+    var lines = text.split("\n");
+    var listEl = null;
+
+    function appendInline(parent, raw) {
+      var parts = raw.split(/(\*\*[^*]+\*\*)/g);
+      parts.forEach(function (part) {
+        if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+          var strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          parent.appendChild(strong);
+        } else if (part) {
+          parent.appendChild(document.createTextNode(part));
+        }
+      });
+    }
+
+    lines.forEach(function (line) {
+      var trimmed = line.trim();
+      if (!trimmed) { listEl = null; return; }
+
+      if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
+        listEl = null;
+        var h = document.createElement("h3");
+        appendInline(h, trimmed.replace(/^#+\s*/, ""));
+        container.appendChild(h);
+        return;
+      }
+      if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        if (!listEl) { listEl = document.createElement("ul"); container.appendChild(listEl); }
+        var li = document.createElement("li");
+        appendInline(li, trimmed.slice(2));
+        listEl.appendChild(li);
+        return;
+      }
+      listEl = null;
+      var p = document.createElement("p");
+      appendInline(p, trimmed);
+      container.appendChild(p);
+    });
+  }
+
+  function renderResult(data) {
+    clearChildren(output);
+
+    var badge = document.createElement("div");
+    badge.className = "agent-badge";
+    badge.textContent = "↳ routed to " + data.agent;
+    output.appendChild(badge);
+
+    var answerEl = document.createElement("div");
+    answerEl.className = "answer";
+    renderAnswer(answerEl, data.answer || "(empty answer)");
+    output.appendChild(answerEl);
+
+    if (data.citations && data.citations.length) {
+      var cites = document.createElement("div");
+      cites.className = "cites";
+      var label = document.createElement("div");
+      label.className = "cites-label";
+      label.textContent = "Citations";
+      cites.appendChild(label);
+      data.citations.forEach(function (c) {
+        var row = document.createElement("div");
+        row.className = "cite";
+        var text = document.createTextNode("→ " + c.ticker + " · " + c.section_title + " · " + c.filing_date + " · ");
+        row.appendChild(text);
+        var a = document.createElement("a");
+        a.href = c.source_url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = "source";
+        row.appendChild(a);
+        cites.appendChild(row);
+      });
+      output.appendChild(cites);
+    }
+  }
+
+  function renderError(message, hint) {
+    clearChildren(output);
+    var box = document.createElement("div");
+    box.className = "err-box";
+    box.textContent = "✗ " + message;
+    if (hint) {
+      var h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = hint;
+      box.appendChild(h);
+    }
+    output.appendChild(box);
+  }
+
+  function renderLoading(query) {
+    clearChildren(output);
+    var row = document.createElement("div");
+    row.className = "loading";
+    var spin = document.createElement("div");
+    spin.className = "spinner";
+    row.appendChild(spin);
+    row.appendChild(document.createTextNode("Routing and asking Claude…"));
+    output.appendChild(row);
+    termLabel.textContent = "POST /query — “" + query.slice(0, 60) + (query.length > 60 ? "…" : "") + "”";
+  }
+
+  async function ask(query) {
+    if (!query.trim()) return;
+    btn.disabled = true;
+    renderLoading(query);
+    try {
+      var res = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query }),
+      });
+      var data = await res.json().catch(function () { return null; });
+      if (!res.ok) {
+        renderError(
+          "Request failed (HTTP " + res.status + ")",
+          data && data.detail ? String(data.detail) : "The API returned an error."
+        );
+        return;
+      }
+      renderResult(data);
+    } catch (err) {
+      renderError("Network error — could not reach the live API.", String(err && err.message ? err.message : err));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    ask(input.value);
+  });
+
+  examples.addEventListener("click", function (e) {
+    var target = e.target.closest(".chip");
+    if (!target) return;
+    input.value = target.getAttribute("data-q");
+    ask(input.value);
+  });
+})();
+</script>
+</body>
+</html>
