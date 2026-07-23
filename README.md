@@ -3,11 +3,16 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phase 5 of 6 done — **live and reachable at
-https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/health**
-(deployed to AWS Lambda; `/query` and `/compare` will 503 until an
-`ANTHROPIC_API_KEY` is added — see below). See
-[finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
+**Status:** Phases 1-5 of 6 done and **fully live**, including LLM
+generation — **try it now:**
+
+```bash
+curl -X POST https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is Costco'"'"'s core business?"}'
+```
+
+See [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
 for the full build spec and phase plan.
 
 ## Phase 1 — Data ingestion & chunking (done)
@@ -130,7 +135,7 @@ prefix logic (mocked model, no weight download in CI), the Pinecone wrapper
 (mocked client — batching, index-creation-if-missing, response mapping), and
 the FAISS/Pinecone factory dispatch.
 
-## Phase 3 — Multi-agent orchestration (code-complete, partially verified live)
+## Phase 3 — Multi-agent orchestration (done, live)
 
 A LangGraph `StateGraph` router: a router node classifies the incoming
 question via Claude tool-calling and a conditional edge dispatches to one of
@@ -162,30 +167,35 @@ swap in Phase 2.
 `data/processed/routing_log.jsonl` (query, chosen agent, extracted args,
 timestamp) — the raw material for a routing-accuracy metric in Phase 4.
 
-### What's verified live vs. pending a key
+### Verified live end-to-end
 
-The **retrieval layer is real and verified against live data** — no LLM key
-needed for this part. `scripts/demo_retrieval.py` runs the exact search and
-filtering logic each agent uses (ticker/section-filtered similarity search,
-full-section lookup) against the actual Phase 2 FAISS index, and it works:
-e.g. searching "supply chain risk" filtered to `AAPL`/`item1a` correctly
-surfaces Apple's actual supply-chain risk language, filtered to `MSFT`
-surfaces Microsoft's, and the `COST` full-section lookup returns Costco's
-real 30-chunk Business section in order.
+Once an `ANTHROPIC_API_KEY` was added, the whole pipeline ran for real with
+no code changes — exactly as designed. Example, verbatim from a live run:
 
-**The LLM generation and routing steps are code-complete and thoroughly
-unit-tested against mocked Anthropic/OpenAI clients (33 new tests), but not
-yet run against a live model** — no `ANTHROPIC_API_KEY` is provisioned in
-this environment yet. Once one is added to `.env`, `scripts/run_query.py`
-runs the whole pipeline for real with no code changes needed.
+> **Query:** "What are Apple's main risk factors?"
+> **Routed to:** `risk_flag`
+>
+> *"...New and evolving laws, executive orders, and enforcement priorities
+> pose increasing risk as Apple expands into specialized applications such
+> as health and financial services, and as it broadens use of machine
+> learning and AI features... New and changing regulations on online
+> safety, minor protections, and mandatory age verification are called out
+> as increasing regulatory risk..."*
+>
+> **Citations:** AAPL Risk Factors (2024-11-01), AAPL Risk Factors (2025-10-31)
+
+The retrieval layer was already verified live in an earlier pass with no
+LLM key needed (`scripts/demo_retrieval.py` — ticker/section-filtered
+search and full-section lookup against the real FAISS index); this
+confirms the routing + generation half on top of it.
 
 ### Run it
 
 ```bash
-# Works right now, no API key needed - proves the retrieval/data layer
+# No API key needed - proves the retrieval/data layer
 python scripts/demo_retrieval.py
 
-# Needs ANTHROPIC_API_KEY in .env
+# Needs ANTHROPIC_API_KEY in .env - runs the full live pipeline
 python scripts/run_query.py "What are Apple's main risk factors?"
 ```
 
@@ -200,7 +210,7 @@ agent functions (mocked LLM + retriever, asserting correct retrieval calls
 and citation building), and the LangGraph wiring itself — routing dispatch,
 decision logging, and the no-tool-call error path.
 
-## Phase 4 — Evaluation framework (code-complete, retrieval half verified live)
+## Phase 4 — Evaluation framework (done, live)
 
 A 24-case hand-labeled eval set ([agent_cases.py](src/finsight/eval/agent_cases.py)),
 6 cases per specialist agent, covering all 8 ingested companies. Every
@@ -208,9 +218,37 @@ A 24-case hand-labeled eval set ([agent_cases.py](src/finsight/eval/agent_cases.
 from the indexed corpus while building the set — not guessed at (one case's
 keywords were initially wrong for exactly this reason: see below).
 
-**Two things get measured per case, once an LLM key exists:**
+**Two things get measured per case:**
 1. **Routing accuracy** — does the router pick the case's labeled `agent`? ([routing_eval.py](src/finsight/eval/routing_eval.py))
 2. **RAGAS-methodology metrics** — faithfulness, answer relevancy, context precision, context recall ([ragas_metrics.py](src/finsight/eval/ragas_metrics.py))
+
+### Results — live run, 24 cases, logged to MLflow (`finsight-agent-evaluation`)
+
+| Metric | Score |
+|---|---|
+| Routing accuracy | 0.792 (19/24) |
+| Faithfulness | 0.663 |
+| Answer relevancy | 0.792 |
+| Context precision | 0.535 |
+| Context recall | 0.860 |
+
+**On the 5 routing misses:** all five are `filing_qa` cases the router sent
+to `risk_flag` or `summarization` instead — not random noise. Questions like
+*"What are Apple's main supply chain risks?"* and *"What is Goldman Sachs'
+business overview?"* are genuinely ambiguous: they're phrased as direct
+questions (which should route to `filing_qa`) but their subject matter
+overlaps heavily with what `risk_flag` and `summarization` exist to handle.
+Claude's routing choice is defensible in each case — this reads as an eval
+set construction issue (questions phrased with risk/overview language) more
+than a router defect, and would be the first thing to revisit before
+trusting this number at face value.
+
+**On context precision (0.535, the lowest score):** the `Retriever`
+over-fetches a large candidate pool per query and returns the top-k after
+filtering (see Item 3 / [retriever.py](src/finsight/retrieval/retriever.py)),
+which trades some precision for recall — consistent with recall (0.860)
+scoring well above precision here. A tighter top-k or a reranking pass
+would be the natural next lever.
 
 ### Why not the `ragas` package
 
@@ -233,34 +271,27 @@ feedback-function instrumentation inside a running app, which fits
 production observability better than the batch, dataset-style evaluation
 this project needed (matching the Phase 2 benchmark's methodology).
 
-### What's verified live vs. pending a key
+### Retrieval-only check (no LLM needed)
 
-**The retrieval half is real and verified live right now** —
 `scripts/run_agent_retrieval_check.py` runs the exact retrieval each
-specialist agent would use for all 24 cases (no LLM involved) and checks
-the expected keywords actually show up: **24/24 (100%) hit rate.** One case
-initially failed this check — `cmp-aapl-msft-cybersecurity` was labeled
-with keywords `("apple", "microsoft")`, but 10-K body text refers to the
-filer as "the Company," not by name, so the literal company-name keywords
-never matched even though the retrieved content was clearly correct. Fixed
-by rechecking the actual retrieved text and relabeling with keywords
-grounded in it (`"data security"`, `"outages"`) — a small, real example of
-why the eval set was built by inspecting live retrieval output rather than
-guessing content.
-
-**Routing accuracy and the four RAGAS-methodology metrics are code-complete
-and unit-tested (25 new tests) against mocked LLM responses, not yet run
-against a live model** — same blocker as Phase 3, no `ANTHROPIC_API_KEY`
-provisioned yet. `scripts/run_agent_eval.py` runs the whole thing for real
-the moment one is added.
+specialist agent would use for all 24 cases and checks the expected
+keywords actually show up: **24/24 (100%) hit rate.** One case initially
+failed this check — `cmp-aapl-msft-cybersecurity` was labeled with keywords
+`("apple", "microsoft")`, but 10-K body text refers to the filer as "the
+Company," not by name, so the literal company-name keywords never matched
+even though the retrieved content was clearly correct. Fixed by rechecking
+the actual retrieved text and relabeling with keywords grounded in it
+(`"data security"`, `"outages"`) — a small, real example of why the eval
+set was built by inspecting live retrieval output rather than guessing
+content.
 
 ### Run it
 
 ```bash
-# Works right now, no API key needed
+# No API key needed
 python scripts/run_agent_retrieval_check.py
 
-# Needs ANTHROPIC_API_KEY in .env
+# Needs ANTHROPIC_API_KEY in .env - runs the full live eval + logs to MLflow
 python scripts/run_agent_eval.py
 ```
 
@@ -286,12 +317,16 @@ client already knows it wants a comparison). Containerized with Docker and
 ```bash
 curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/health
 curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings
+
+curl -X POST https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query \
+  -H "Content-Type: application/json" -d '{"query": "What is Costco'"'"'s core business?"}'
 ```
 
-`/query` and `/compare` return a `503` with a clear message rather than
-crashing, since no `ANTHROPIC_API_KEY` is provisioned in this deployment
-yet — same honest gap as Phases 3/4, now visible live instead of just in
-local tests.
+All four endpoints are fully live — `/query` and `/compare` run the real
+router and LLM generation against the deployed Lambda, not a stub. If they
+ever 503, it means the `ANTHROPIC_API_KEY` environment variable on the
+Lambda function has been removed or expired; `/health`'s `llm_configured`
+field reports this directly.
 
 ### Architecture: AWS Lambda (container image) + Function URL
 
@@ -300,7 +335,7 @@ flowchart LR
     client[Client] -->|HTTPS| furl[Lambda Function URL]
     furl --> lambda[Lambda: FastAPI via Mangum]
     lambda --> faiss[(FAISS index<br/>baked into image)]
-    lambda -->|only if key set| claude[Claude API]
+    lambda --> claude[Claude API]
 ```
 
 - **`Dockerfile`** — generic image (plain `python:3.12-slim` + uvicorn), for local runs or an ECS/Fargate-style deployment
