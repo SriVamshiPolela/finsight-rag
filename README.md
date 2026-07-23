@@ -374,14 +374,27 @@ docker run -p 8000:8000 finsight-rag-api:local
 curl http://localhost:8000/health
 ```
 
+### Live in-browser demo
+
+[web/demo.html](web/demo.html) is a standalone page (open it directly, no
+build step) that calls the deployed Lambda from client-side JS and renders
+the real response — type a question, get a real routed, cited answer in the
+page. This required adding CORS to the API (`CORSMiddleware`, open since
+it's a public read-only demo with no auth or user data) and redeploying.
+Verified end-to-end with a real headless-browser run against the live
+endpoint, not just curl: agent badge, formatted answer, and citation link
+all rendered correctly from a real cross-origin fetch. Not linkable from a
+hosted static site here — just open the file locally.
+
 ### Tests
 
-90 tests total (9 new): `/health`, `/filings`, `/query`, `/compare`, request
-validation (empty query, single-ticker compare), the 503-without-LLM path
-for both LLM-dependent endpoints, and that `/compare` calls the comparison
-agent directly rather than going through the router — all against a real
-FastAPI `TestClient` with mocked LLM/retriever dependencies injected via
-`monkeypatch`, not a hand-rolled request stub.
+92 tests total (11 new since the API was first built): `/health`,
+`/filings`, `/query`, `/compare`, request validation (empty query,
+single-ticker compare), the 503-without-LLM path for both LLM-dependent
+endpoints, that `/compare` calls the comparison agent directly rather than
+going through the router, and CORS preflight/response headers — all against
+a real FastAPI `TestClient` with mocked LLM/retriever dependencies injected
+via `monkeypatch`, not a hand-rolled request stub.
 
 ## Coming next
 

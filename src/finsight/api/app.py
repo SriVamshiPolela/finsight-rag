@@ -15,6 +15,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from finsight.agents.comparison import answer_comparison
 from finsight.agents.graph import build_graph
@@ -40,6 +41,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FinSight RAG API", lifespan=lifespan)
+
+# Public, read-only demo API with no auth or user data - open CORS so the
+# static demo page (web/demo.html) can call it directly from a browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 def _require_llm(app: FastAPI) -> None:

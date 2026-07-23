@@ -119,3 +119,23 @@ def test_compare_bypasses_router_and_calls_comparison_agent_directly(client_with
 
     assert resp.status_code == 200
     assert resp.json()["answer"] == "They differ."
+
+
+def test_cors_preflight_allows_cross_origin_post(client_without_llm):
+    resp = client_without_llm.options(
+        "/query",
+        headers={
+            "Origin": "http://localhost:5500",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
+    assert "POST" in resp.headers["access-control-allow-methods"]
+
+
+def test_cors_header_present_on_actual_response(client_without_llm):
+    resp = client_without_llm.get("/health", headers={"Origin": "http://localhost:5500"})
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
