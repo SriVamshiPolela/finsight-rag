@@ -365,8 +365,8 @@ traffic, the tradeoffs point elsewhere:
 ### Run it
 
 ```bash
-# Local, no Docker
-python -m uvicorn finsight.api.app:app --reload
+# Local, no Docker - PYTHONPATH=src is required, the package isn't pip-installed
+PYTHONPATH=src python -m uvicorn finsight.api.app:app --reload
 
 # Local, containerized (same image logic as what's deployed)
 docker build -t finsight-rag-api:local .
