@@ -3,13 +3,20 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phases 1-5 of 6 done and **fully live**, including LLM
-generation — **try it now:**
+**Status:** Phases 1-5 of 6 done. `/health` and `/filings` are live on the
+public endpoint right now. `/query` and `/compare` have been **verified
+live end-to-end** (real routing, real Claude generation, real MLflow-logged
+eval numbers — see Phases 3-4 below for the actual transcripts and
+metrics), but the Anthropic key is currently **not** attached to the public
+deployment — deliberately, since the Lambda URL has no auth and leaving a
+billed key on an unauthenticated public endpoint is a real cost/abuse risk,
+not a hypothetical one. `/query`/`/compare` return a clean `503` until a
+key is reattached (one `aws lambda update-function-configuration` call —
+see Phase 5).
 
 ```bash
-curl -X POST https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is Costco'"'"'s core business?"}'
+# Works right now
+curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings
 ```
 
 See [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
@@ -322,11 +329,20 @@ curl -X POST https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aw
   -H "Content-Type: application/json" -d '{"query": "What is Costco'"'"'s core business?"}'
 ```
 
-All four endpoints are fully live — `/query` and `/compare` run the real
-router and LLM generation against the deployed Lambda, not a stub. If they
-ever 503, it means the `ANTHROPIC_API_KEY` environment variable on the
-Lambda function has been removed or expired; `/health`'s `llm_configured`
-field reports this directly.
+All four endpoints run real code against the deployed Lambda, not a stub —
+`/query` and `/compare` were verified working end-to-end with a real
+Anthropic key attached (see Phases 3-4 for the actual transcripts and
+numbers that produced). **The key is deliberately not attached right now**:
+this Function URL has `AuthType=NONE` — no auth at all — so leaving a
+billed API key on it would let anyone who finds the URL run up real
+charges. Until a key is reattached, `/query`/`/compare` return a clean
+`503` explaining why, and `/health`'s `llm_configured` field reports the
+current state directly. Reattaching is one command:
+
+```bash
+aws lambda update-function-configuration --function-name finsight-rag-api --region us-east-2 \
+  --environment "Variables={VECTOR_STORE=faiss,ROUTING_LOG_PATH=/tmp/routing_log.jsonl,ANTHROPIC_API_KEY=<key>}"
+```
 
 ### Architecture: AWS Lambda (container image) + Function URL
 
@@ -379,12 +395,18 @@ curl http://localhost:8000/health
 [web/demo.html](web/demo.html) is a standalone page (open it directly, no
 build step) that calls the deployed Lambda from client-side JS and renders
 the real response — type a question, get a real routed, cited answer in the
-page. This required adding CORS to the API (`CORSMiddleware`, open since
-it's a public read-only demo with no auth or user data) and redeploying.
-Verified end-to-end with a real headless-browser run against the live
-endpoint, not just curl: agent badge, formatted answer, and citation link
-all rendered correctly from a real cross-origin fetch. Not linkable from a
-hosted static site here — just open the file locally.
+page. This required adding CORS to the API (`CORSMiddleware`, `allow_origins=["*"]`
+— reasonable for a public API with no auth or user data to protect, though
+see the cost caveat below) and redeploying. Verified end-to-end with a real
+headless-browser run against the live endpoint, not just curl: agent
+badge, formatted answer, and citation link all rendered correctly from a
+real cross-origin fetch. Not linkable from a hosted static site here — just
+open the file locally.
+
+Since the Anthropic key isn't currently attached to the Lambda (see above),
+this page will currently show a `503` error state when you ask a question
+— that's the correct, tested behavior for "no key configured," not a bug.
+It'll answer for real again once a key is reattached.
 
 ### Tests
 
