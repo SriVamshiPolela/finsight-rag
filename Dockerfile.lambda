@@ -1,0 +1,29 @@
+# Separate from the main Dockerfile because Lambda needs the AWS Runtime
+# Interface Client invoking a per-event handler function, not a persistent
+# uvicorn server - a genuinely different image shape, not just a CMD tweak.
+FROM public.ecr.aws/lambda/python:3.12
+
+# CPU-only torch first, same rationale as the main Dockerfile: the default
+# PyPI wheel drags in ~1.5GB of unused NVIDIA CUDA libraries.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+# Bake the embedding model weights in at build time under a fixed cache dir
+# baked into the image (not /tmp): Lambda's default HF cache location
+# (under its sandboxed user home) is read-only, so without this, every cold
+# start crashed trying to write there - see PR description for the traceback.
+ENV HF_HOME=/opt/hf_cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/e5-small-v2')"
+
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+COPY data/processed/chunks.jsonl ${LAMBDA_TASK_ROOT}/data/processed/chunks.jsonl
+COPY data/processed/manifest.json ${LAMBDA_TASK_ROOT}/data/processed/manifest.json
+COPY data/indexes/e5-small/ ${LAMBDA_TASK_ROOT}/data/indexes/e5-small/
+
+ENV PYTHONPATH=${LAMBDA_TASK_ROOT}/src
+ENV VECTOR_STORE=faiss
+ENV ROUTING_LOG_PATH=/tmp/routing_log.jsonl
+
+CMD ["finsight.api.lambda_handler.handler"]

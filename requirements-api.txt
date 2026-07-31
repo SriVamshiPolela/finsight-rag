@@ -1,0 +1,13 @@
+# Runtime-only subset of requirements.txt for the deployed API image.
+# Excludes ingestion (requests/bs4/lxml), MLflow, and dev/test tooling
+# (pytest/ruff) - none of that runs inside the serving container.
+fastapi>=0.111
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
+sentence-transformers>=3.0
+faiss-cpu>=1.8
+pinecone>=5.0
+langgraph>=0.2
+anthropic>=0.30
+openai>=1.30
+mangum>=0.17
