@@ -3,7 +3,7 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phases 1-5 of 6 done.
+**Status:** Phase 6 of 6 in progress (docs, tests, CI). Phases 1-5 done.
 
 **Live showcase:** https://huggingface.co/spaces/srivamshipolela/finsight-rag
 — a static page with real, unedited transcripts from the system (see below
@@ -20,6 +20,45 @@ live in ~15 minutes are in Phase 5 below.
 
 See [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
 for the full build spec and phase plan.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[SEC EDGAR API] --> B[Parse + chunk]
+    B --> C[(chunks.jsonl<br/>3,616 chunks)]
+    C --> D[Embed: e5-small]
+    D --> E[(FAISS / Pinecone)]
+    E --> F[Retriever]
+    F --> G{LangGraph router<br/>Claude tool-call}
+    G --> H1[Filing Q&A]
+    G --> H2[Comparison]
+    G --> H3[Risk / Red-Flag]
+    G --> H4[Summarization]
+    H1 & H2 & H3 & H4 --> I[Claude generates<br/>cited answer]
+    I --> J[FastAPI]
+    J --> K[Docker]
+```
+
+Each stage is a phase below, in build order, with its own real results.
+
+## Quickstart
+
+```bash
+git clone https://github.com/SriVamshiPolela/finsight-rag.git && cd finsight-rag
+python -m venv .venv && ./.venv/Scripts/activate   # or source .venv/bin/activate on macOS/Linux
+pip install -r requirements.txt
+cp .env.example .env   # fill in ANTHROPIC_API_KEY at minimum
+
+python scripts/ingest.py                    # pull real 10-Ks from SEC EDGAR (~1 min)
+python scripts/run_embedding_benchmark.py   # benchmark + build the FAISS index (~10 min on CPU)
+PYTHONPATH=src python -m uvicorn finsight.api.app:app --reload
+```
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" -d '{"query": "What are Apple'"'"'s main risk factors?"}'
+```
 
 ## Phase 1 — Data ingestion & chunking (done)
 
@@ -441,6 +480,21 @@ going through the router, and CORS preflight/response headers — all against
 a real FastAPI `TestClient` with mocked LLM/retriever dependencies injected
 via `monkeypatch`, not a hand-rolled request stub.
 
-## Coming next
+## Phase 6 — Docs, tests, CI/CD, polish
 
-- **Phase 6** — full docs, CI/CD, demo script
+- **GitHub Actions** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — lints (`ruff`) and runs the full 92-test suite on every push to any branch and every PR into `main`/`dev`, plus a separate job that builds the API Docker image (no push) to catch a broken `Dockerfile` before it ever reaches a deploy. Check the [Actions tab](https://github.com/SriVamshiPolela/finsight-rag/actions) for green runs.
+- **Demo script** — [DEMO_SCRIPT.md](DEMO_SCRIPT.md), a ~75-second script that references specific files and real metrics, meant to be read aloud in an interview.
+- **This README** — architecture diagram, Quickstart, a real example query/response and evaluation table per phase, and this section, honestly assessing what's portfolio-grade vs. what a real production system would still need.
+
+### What I'd do differently at scale
+
+Concrete gaps between "portfolio-grade" and "production-grade," in the
+order I'd actually tackle them:
+
+1. **Retrieval filtering.** The `Retriever` over-fetches a large candidate pool from FAISS and filters by ticker/section client-side ([retriever.py](src/finsight/retrieval/retriever.py)) rather than using real filtered vector search. This is very likely why context precision (0.535) scored lowest of the four RAGAS-methodology metrics in Phase 4. At scale: Pinecone's native metadata filtering, or per-ticker sharded indexes.
+2. **Auth and rate limiting.** The AWS Function URL had zero authentication — fine to prove the deployment works, not fine to leave live indefinitely with a billed key attached (see Phase 5). A real deployment needs API keys or a proper gateway with usage plans, plus a hard spend cap on the Anthropic side regardless.
+3. **Eval set size and generation.** 24 hand-labeled cases is enough to catch a real bug (the routing-ambiguity pattern in Phase 4) but not enough to trust a metric like "79% routing accuracy" with much statistical confidence. At scale: hundreds of cases, ideally with some semi-automated generation plus human review, and tracking metric drift over time in MLflow rather than one-off runs.
+4. **Data freshness.** The corpus is a one-time pull of 14 filings. A real system needs a scheduled ingestion job watching EDGAR for new filings and incrementally re-indexing, not a manual `python scripts/ingest.py`.
+5. **Cold starts.** ~18s on Lambda even after baking in model weights (Phase 5). Fine for a demo; a real product would want provisioned concurrency or a always-warm ECS/Fargate deployment (documented as the alternative in Phase 5, not built).
+6. **Observability.** Routing decisions log to a flat JSONL file ([graph.py](src/finsight/agents/graph.py)). At scale that's structured logs into something queryable, with a dashboard tracking routing accuracy and RAGAS scores over time, not a one-time eval run.
+7. **Embedding specialization.** Both benchmarked embedding models (Phase 2) are off-the-shelf. Fine-tuning on financial-domain text (e.g., contrastive learning over SEC filing Q&A pairs) would likely move retrieval quality more than swapping between two pretrained models ever could.
