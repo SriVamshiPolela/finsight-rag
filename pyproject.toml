@@ -7,3 +7,7 @@ line-length = 120
 # this file existed. E4/E7/E9/F are ruff's own documented default families;
 # stating them here makes behavior deterministic across ruff versions.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

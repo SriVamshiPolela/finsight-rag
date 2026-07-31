@@ -36,6 +36,5 @@ mangum>=0.17
 
 # Phase 6 - testing / CI
 pytest>=8.2
-pytest-asyncio>=0.23
-httpx>=0.27
+httpx>=0.27   # not imported directly - required by fastapi.testclient.TestClient
 ruff>=0.5
