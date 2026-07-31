@@ -422,11 +422,11 @@ interview than one where I can explain what broke and why:
 
 ### Documented alternative: ECS/Fargate or SageMaker
 
-Lambda was chosen as the "lightweight path" per the spec, and it's what's
-actually live. For a "real" production deployment at higher, steadier
-traffic, the tradeoffs point elsewhere:
+Lambda was chosen as the "lightweight path" per the spec, and it's what was
+verified live (see above — since retired). For a "real" production
+deployment at higher, steadier traffic, the tradeoffs point elsewhere:
 
-- **ECS/Fargate** would use the plain `Dockerfile` image (already built and tested) behind an Application Load Balancer — no cold starts, no 29s/Lambda-specific constraints, better fit for sustained traffic. Steps: push the same non-Lambda image to ECR (already done), create an ECS cluster + Fargate service + target group + ALB, point DNS at the ALB. Not deployed here to keep AWS spend and moving parts minimal for a portfolio project — the container is proven to work standalone (see Phase 5 local Docker testing).
+- **ECS/Fargate** would use the plain `Dockerfile` image (already built and tested locally) behind an Application Load Balancer — no cold starts, no 29s/Lambda-specific constraints, better fit for sustained traffic. Steps: push the same non-Lambda image to a fresh ECR repo (the original was deleted along with the rest of the AWS teardown above), create an ECS cluster + Fargate service + target group + ALB, point DNS at the ALB. Not deployed here to keep AWS spend and moving parts minimal for a portfolio project — the container is proven to work standalone (see "Run it locally" below).
 - **SageMaker** endpoints are built for serving trained ML models (classification/regression) behind a managed, autoscaling inference endpoint — a natural fit if this project's embedding model were fine-tuned rather than used off-the-shelf. Since the embedding models here are pretrained and unmodified, a SageMaker real-time endpoint would mostly add cost and complexity over the Lambda/ECS path without a corresponding benefit; noted here as the documented alternative per the original spec rather than actually built.
 
 ### Live showcase: Hugging Face Spaces
