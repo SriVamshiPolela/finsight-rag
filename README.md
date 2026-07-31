@@ -3,21 +3,20 @@
 Multi-agent Retrieval-Augmented Generation system for financial document
 intelligence over SEC filings (10-K/10-Q/8-K).
 
-**Status:** Phases 1-5 of 6 done. `/health` and `/filings` are live on the
-public endpoint right now. `/query` and `/compare` have been **verified
-live end-to-end** (real routing, real Claude generation, real MLflow-logged
-eval numbers — see Phases 3-4 below for the actual transcripts and
-metrics), but the Anthropic key is currently **not** attached to the public
-deployment — deliberately, since the Lambda URL has no auth and leaving a
-billed key on an unauthenticated public endpoint is a real cost/abuse risk,
-not a hypothetical one. `/query`/`/compare` return a clean `503` until a
-key is reattached (one `aws lambda update-function-configuration` call —
-see Phase 5).
+**Status:** Phases 1-5 of 6 done.
 
-```bash
-# Works right now
-curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings
-```
+**Live showcase:** https://huggingface.co/spaces/srivamshipolela/finsight-rag
+— a static page with real, unedited transcripts from the system (see below
+for why it's static rather than a live API right now).
+
+**AWS deployment:** built, and **verified live end-to-end** — real routing,
+real Claude generation, real MLflow-logged eval numbers (see Phases 3-4 for
+the actual transcripts and metrics) — then **intentionally torn down**
+after verification. An always-on, unauthenticated public endpoint with a
+billed Anthropic key attached is a real cost/abuse risk, not a hypothetical
+one, and there's no benefit to leaving compute running 24/7 for a portfolio
+project nobody's actively using. The exact `aws` commands to redeploy it
+live in ~15 minutes are in Phase 5 below.
 
 See [finsight-rag-claude-code-prompt_1.md](finsight-rag-claude-code-prompt_1.md)
 for the full build spec and phase plan.
@@ -312,36 +311,49 @@ routing-accuracy evaluator, the full combined eval orchestration
 flagging), and the retrieval-check dispatch logic for all 4 agent types
 (synthetic FAISS store, monkeypatched corpus lookup for summarization).
 
-## Phase 5 — API + deployment (done, live on AWS)
+## Phase 5 — API + deployment (built, verified live on AWS, then retired)
 
 FastAPI service exposing `/health`, `/filings`, `/query` (full router), and
 `/compare` (dedicated comparison endpoint — bypasses routing since the
 client already knows it wants a comparison). Containerized with Docker and
-**actually deployed and reachable**, not left as instructions:
+**actually deployed and reachable on AWS Lambda** — not left as
+instructions — and verified end-to-end with a real Anthropic key attached
+(see Phases 3-4 for the actual transcripts and numbers that produced).
 
-**Live endpoint:** https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/
+**That AWS deployment has since been torn down** (Lambda function, ECR
+repo, IAM role all deleted) after verification was complete. Reasoning:
+this Function URL had `AuthType=NONE` — no auth at all — so leaving a
+billed Anthropic key attached to an always-on public endpoint is a real
+cost/abuse risk, not a hypothetical one, and there's no benefit to paying
+even the small always-on ECR storage cost for a portfolio project with no
+active traffic. **The live, public-facing link is now
+[Hugging Face Spaces](#live-showcase-hugging-face-spaces)** — a static
+page, genuinely free with no billing account attached at all, showing the
+same real transcripts this AWS deployment produced.
 
-```bash
-curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/health
-curl https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings
-
-curl -X POST https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query \
-  -H "Content-Type: application/json" -d '{"query": "What is Costco'"'"'s core business?"}'
-```
-
-All four endpoints run real code against the deployed Lambda, not a stub —
-`/query` and `/compare` were verified working end-to-end with a real
-Anthropic key attached (see Phases 3-4 for the actual transcripts and
-numbers that produced). **The key is deliberately not attached right now**:
-this Function URL has `AuthType=NONE` — no auth at all — so leaving a
-billed API key on it would let anyone who finds the URL run up real
-charges. Until a key is reattached, `/query`/`/compare` return a clean
-`503` explaining why, and `/health`'s `llm_configured` field reports the
-current state directly. Reattaching is one command:
+Redeploying to AWS is the same handful of commands used to build it the
+first time (\~15 minutes):
 
 ```bash
-aws lambda update-function-configuration --function-name finsight-rag-api --region us-east-2 \
+# 1. ECR repo + push the Lambda image
+aws ecr create-repository --repository-name finsight-rag-api --region us-east-2
+docker build -f Dockerfile.lambda -t finsight-rag-api:lambda --provenance=false --sbom=false .
+aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-2.amazonaws.com
+docker tag finsight-rag-api:lambda <account-id>.dkr.ecr.us-east-2.amazonaws.com/finsight-rag-api:latest
+docker push <account-id>.dkr.ecr.us-east-2.amazonaws.com/finsight-rag-api:latest
+
+# 2. IAM execution role (trust policy: lambda.amazonaws.com, policy: AWSLambdaBasicExecutionRole)
+aws iam create-role --role-name finsight-rag-lambda-role --assume-role-policy-document file://trust-policy.json
+aws iam attach-role-policy --role-name finsight-rag-lambda-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+# 3. Lambda function + public Function URL (needs BOTH permissions below, per AWS's Oct 2025 change)
+aws lambda create-function --function-name finsight-rag-api --package-type Image \
+  --image-uri <account-id>.dkr.ecr.us-east-2.amazonaws.com/finsight-rag-api:latest \
+  --role arn:aws:iam::<account-id>:role/finsight-rag-lambda-role --timeout 90 --memory-size 3008 \
   --environment "Variables={VECTOR_STORE=faiss,ROUTING_LOG_PATH=/tmp/routing_log.jsonl,ANTHROPIC_API_KEY=<key>}"
+aws lambda create-function-url-config --function-name finsight-rag-api --auth-type NONE
+aws lambda add-permission --function-name finsight-rag-api --statement-id url-invoke --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE
+aws lambda add-permission --function-name finsight-rag-api --statement-id url-invoke-fn --action lambda:InvokeFunction --principal "*"
 ```
 
 ### Architecture: AWS Lambda (container image) + Function URL
@@ -378,35 +390,46 @@ traffic, the tradeoffs point elsewhere:
 - **ECS/Fargate** would use the plain `Dockerfile` image (already built and tested) behind an Application Load Balancer — no cold starts, no 29s/Lambda-specific constraints, better fit for sustained traffic. Steps: push the same non-Lambda image to ECR (already done), create an ECS cluster + Fargate service + target group + ALB, point DNS at the ALB. Not deployed here to keep AWS spend and moving parts minimal for a portfolio project — the container is proven to work standalone (see Phase 5 local Docker testing).
 - **SageMaker** endpoints are built for serving trained ML models (classification/regression) behind a managed, autoscaling inference endpoint — a natural fit if this project's embedding model were fine-tuned rather than used off-the-shelf. Since the embedding models here are pretrained and unmodified, a SageMaker real-time endpoint would mostly add cost and complexity over the Lambda/ECS path without a corresponding benefit; noted here as the documented alternative per the original spec rather than actually built.
 
-### Run it
+### Live showcase: Hugging Face Spaces
+
+**https://huggingface.co/spaces/srivamshipolela/finsight-rag**
+
+[site/index.html](site/index.html) — a static page (Hugging Face Spaces
+"static" SDK: genuinely free, no billing account attached at all, so a
+surprise charge is structurally impossible, not just unlikely) showing
+real, unedited transcripts captured while the AWS deployment was live —
+one example per specialist agent, the real Phase 4 eval numbers, and the
+architecture. It deliberately doesn't make live API calls (see the cost
+reasoning above); it's a showcase of real prior output, clearly labeled as
+such on the page itself, not a live demo pretending to be one.
+
+### Run it locally
 
 ```bash
-# Local, no Docker - PYTHONPATH=src is required, the package isn't pip-installed
+# No Docker - PYTHONPATH=src is required, the package isn't pip-installed
 PYTHONPATH=src python -m uvicorn finsight.api.app:app --reload
 
-# Local, containerized (same image logic as what's deployed)
+# Containerized (same image logic as what was deployed)
 docker build -t finsight-rag-api:local .
 docker run -p 8000:8000 finsight-rag-api:local
 curl http://localhost:8000/health
 ```
 
-### Live in-browser demo
+### Live in-browser demo (local only)
 
 [web/demo.html](web/demo.html) is a standalone page (open it directly, no
-build step) that calls the deployed Lambda from client-side JS and renders
-the real response — type a question, get a real routed, cited answer in the
-page. This required adding CORS to the API (`CORSMiddleware`, `allow_origins=["*"]`
-— reasonable for a public API with no auth or user data to protect, though
-see the cost caveat below) and redeploying. Verified end-to-end with a real
-headless-browser run against the live endpoint, not just curl: agent
+build step) that calls a running API from client-side JS via `fetch()` and
+renders the real response — type a question, get a real routed, cited
+answer in the page. This required adding CORS to the API (`CORSMiddleware`,
+`allow_origins=["*"]` — reasonable for a public API with no auth or user
+data to protect). Verified end-to-end with a real headless-browser run
+against the live AWS deployment while it existed, not just curl: agent
 badge, formatted answer, and citation link all rendered correctly from a
-real cross-origin fetch. Not linkable from a hosted static site here — just
-open the file locally.
+real cross-origin fetch.
 
-Since the Anthropic key isn't currently attached to the Lambda (see above),
-this page will currently show a `503` error state when you ask a question
-— that's the correct, tested behavior for "no key configured," not a bug.
-It'll answer for real again once a key is reattached.
+Since the AWS deployment has been torn down, `web/demo.html`'s hardcoded
+endpoint is currently dead — point `ENDPOINT` in the script at
+`http://localhost:8000` (or a redeployed AWS URL) to use it again.
 
 ### Tests
 

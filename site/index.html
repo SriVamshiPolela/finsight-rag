@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FinSight RAG — Ask your 10-K anything</title>
+<meta name="description" content="Multi-agent RAG over real SEC 10-K filings. Router + 4 specialist agents, benchmarked embeddings, live-verified end-to-end." />
+<style>
+  :root {
+    --void: #0a1512; --void-raised: #0f1c17; --void-line: #223a31;
+    --day: #eef1ed; --day-raised: #f8faf7; --day-line: #d5ddd1;
+    --ink-on-void: #e7efe9; --ink-on-void-dim: #93a89c;
+    --ink-on-day: #142019; --ink-on-day-dim: #56685d;
+    --amber-dark: #e8a33d; --amber-light: #a8641a;
+    --live: #5fbf8e; --live-lt: #2f8a5e;
+    --mono: "SF Mono", "Cascadia Code", "Consolas", ui-monospace, "Courier New", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: var(--void); --surface: var(--void-raised); --line: var(--void-line);
+      --fg: var(--ink-on-void); --fg-dim: var(--ink-on-void-dim); --amber: var(--amber-dark);
+      --live-c: var(--live); --glow: rgba(232,163,61,.22); }
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: var(--day); --surface: var(--day-raised); --line: var(--day-line);
+      --fg: var(--ink-on-day); --fg-dim: var(--ink-on-day-dim); --amber: var(--amber-light);
+      --live-c: var(--live-lt); --glow: rgba(168,100,26,.14); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--glow); color: var(--fg); }
+  a { color: var(--amber); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+  code, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  h1, h2, h3 { font-family: var(--mono); font-weight: 700; text-wrap: balance; margin: 0; letter-spacing: -0.02em; }
+  p { margin: 0; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  .ticker-wrap { border-bottom: 1px solid var(--line); overflow: hidden; background: var(--surface); }
+  .ticker { display: flex; gap: 40px; padding: 9px 0; white-space: nowrap; width: max-content;
+    animation: scroll 32s linear infinite; font-family: var(--mono); font-size: 12.5px; }
+  .ticker span { color: var(--fg-dim); }
+  .ticker b { color: var(--fg); font-weight: 600; }
+  @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  .hero { padding: 64px 0 40px; }
+  .kicker { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--live-c); margin-bottom: 22px; flex-wrap: wrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live-c);
+    box-shadow: 0 0 0 0 var(--glow); animation: pulse 2.4s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--glow); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+  h1.brand { font-size: clamp(38px, 6.4vw, 66px); line-height: .98; }
+  .dek { font-family: var(--sans); font-size: clamp(16px, 2vw, 19px); color: var(--fg-dim); max-width: 50ch;
+    margin: 20px 0 8px; font-weight: 400; line-height: 1.6; }
+  .honesty-note { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); max-width: 60ch; margin: 0 0 30px;
+    padding-left: 14px; border-left: 2px solid var(--line); line-height: 1.7; }
+  .honesty-note a { color: var(--fg-dim); }
+
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 46px; }
+  .btn { font-family: var(--mono); font-size: 13.5px; padding: 12px 20px; border-radius: 3px; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 8px; border: 1px solid transparent; cursor: pointer; }
+  .btn-primary { background: var(--amber); color: var(--void); font-weight: 700; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { border-color: var(--line); color: var(--fg); background: transparent; }
+  .btn-ghost:hover { border-color: var(--amber); color: var(--amber); }
+
+  .term { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden;
+    box-shadow: 0 30px 60px -30px var(--glow); }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
+  .term-dots { display: flex; gap: 6px; }
+  .term-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
+  .term-body { padding: 22px 24px 26px; }
+  .prompt-row { display: flex; gap: 10px; color: var(--fg-dim); margin-bottom: 14px; font-family: var(--mono); font-size: 13.5px; }
+  .prompt-row .glyph { color: var(--amber); }
+  .prompt-row .q { color: var(--fg); }
+  .agent-badge { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11.5px;
+    padding: 4px 10px; border: 1px solid var(--amber); color: var(--amber); border-radius: 3px; margin-bottom: 16px; }
+  .answer { font-family: var(--sans); font-size: 14.5px; color: var(--fg); max-width: 68ch; }
+  .answer p + p { margin-top: 10px; }
+  .cites { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  .cites-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-dim); margin-bottom: 8px; }
+  .cite { font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); display: flex; gap: 8px; padding: 3px 0; flex-wrap: wrap; }
+  .cite a { color: var(--fg-dim); text-decoration: none; }
+  .cite a:hover { color: var(--amber); text-decoration: underline; }
+
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  .section-label { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--amber); margin-bottom: 10px; }
+  h2 { font-size: clamp(22px, 3vw, 30px); margin-bottom: 10px; }
+  .section-dek { color: var(--fg-dim); max-width: 62ch; font-size: 15px; margin-bottom: 34px; }
+
+  /* more-examples cards */
+  .example-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .ex-card { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 18px 18px 20px; }
+  .ex-card .ex-agent { font-family: var(--mono); font-size: 10.5px; color: var(--amber); letter-spacing: .04em; margin-bottom: 8px; }
+  .ex-card .ex-q { font-family: var(--sans); font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
+  .ex-card .ex-a { font-family: var(--sans); font-size: 12.5px; color: var(--fg-dim); line-height: 1.6; }
+  .ex-card .ex-cite { font-family: var(--mono); font-size: 10.5px; color: var(--fg-dim); margin-top: 12px;
+    padding-top: 10px; border-top: 1px dashed var(--line); }
+
+  .agent-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .agent-card { border: 1px solid var(--line); border-radius: 6px; padding: 18px 16px; background: var(--surface); }
+  .agent-card .tag { font-family: var(--mono); font-size: 10px; color: var(--amber); letter-spacing: .05em; }
+  .agent-card h3 { font-family: var(--sans); font-size: 14.5px; font-weight: 700; margin: 8px 0 6px; letter-spacing: 0; }
+  .agent-card p { font-size: 12.5px; color: var(--fg-dim); }
+
+  .stat-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--line);
+    border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .stat { background: var(--surface); padding: 18px 14px; text-align: left; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 700; color: var(--amber); }
+  .stat .l { font-family: var(--mono); font-size: 10.5px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: .04em; margin-top: 4px; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .chip { font-family: var(--mono); font-size: 11.5px; padding: 5px 11px; border: 1px solid var(--line);
+    border-radius: 20px; color: var(--fg-dim); }
+
+  .run-box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px;
+    font-family: var(--mono); font-size: 12.5px; overflow-x: auto; margin-top: 18px; white-space: pre; }
+  .run-box .c1 { color: var(--fg-dim); }
+  .run-box .c2 { color: var(--amber); }
+
+  footer { padding: 40px 0 60px; border-top: 1px solid var(--line); display: flex; justify-content: space-between;
+    align-items: center; flex-wrap: wrap; gap: 14px; }
+  footer .f-left { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
+  footer .f-links { display: flex; gap: 18px; font-family: var(--mono); font-size: 12.5px; }
+  footer a { text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 780px) {
+    .example-grid { grid-template-columns: 1fr; }
+    .agent-grid { grid-template-columns: 1fr 1fr; }
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 460px) {
+    .agent-grid { grid-template-columns: 1fr; }
+    .stat-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="ticker-wrap">
+  <div class="wrap"><div class="ticker" aria-hidden="true">
+    <span><b>AAPL</b> Technology</span><span><b>MSFT</b> Technology</span><span><b>NVDA</b> Technology</span>
+    <span><b>JPM</b> Financials</span><span><b>GS</b> Financials</span><span><b>WMT</b> Consumer Retail</span>
+    <span><b>COST</b> Consumer Retail</span><span><b>TGT</b> Consumer Retail</span>
+    <span><b>AAPL</b> Technology</span><span><b>MSFT</b> Technology</span><span><b>NVDA</b> Technology</span>
+    <span><b>JPM</b> Financials</span><span><b>GS</b> Financials</span><span><b>WMT</b> Consumer Retail</span>
+    <span><b>COST</b> Consumer Retail</span><span><b>TGT</b> Consumer Retail</span>
+  </div></div>
+</div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker"><span class="dot"></span> Real filings · Real Claude output · Verified live end-to-end</div>
+    <h1 class="brand">FinSight&nbsp;RAG</h1>
+    <p class="dek">Multi-agent retrieval over real SEC 10-K filings. Ask a question in plain English — a router picks the right specialist, retrieves grounded context, and answers with citations back to the actual filing.</p>
+    <p class="honesty-note">Every example on this page is a real, unedited transcript captured while the system was
+      live on AWS Lambda with a real Claude API key attached. That deployment has since been intentionally retired
+      — an always-on, unauthenticated public endpoint with a billed key attached is a real cost/abuse risk, not a
+      hypothetical one — so this page is now statically hosted and doesn't make live calls. The code, and the exact
+      commands to redeploy it live, are on GitHub.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/SriVamshiPolela/finsight-rag" target="_blank" rel="noopener">→ View source on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/SriVamshiPolela/finsight-rag#readme" target="_blank" rel="noopener">Read the full README</a>
+    </div>
+
+    <div class="term">
+      <div class="term-bar">
+        <span>POST /query</span>
+        <div class="term-dots"><i></i><i></i><i></i></div>
+      </div>
+      <div class="term-body">
+        <div class="prompt-row"><span class="glyph">$</span><span class="q">"What are Goldman Sachs' key risk factors?"</span></div>
+        <div class="agent-badge">↳ routed to risk_flag</div>
+        <div class="answer">
+          <p><strong>Regulatory &amp; legal —</strong> governmental scrutiny and negative publicity; substantial civil or criminal liability has in the past had, and may in the future have, material adverse financial and reputational effects.</p>
+          <p><strong>Resolution &amp; liquidation —</strong> GS's own proposed single-point-of-entry resolution strategy could result in greater losses for security holders in a resolution scenario.</p>
+          <p><strong>Market &amp; macro —</strong> business, financial condition, and results have been adversely affected by global conflicts and related sanctions — a realized, not just potential, impact.</p>
+        </div>
+        <div class="cites">
+          <div class="cites-label">Citations</div>
+          <div class="cite">→ GS · Risk Factors · 2026-02-25 · <a href="https://www.sec.gov/Archives/edgar/data/886982/000088698226000091/gs-20251231.htm" target="_blank" rel="noopener">sec.gov/Archives/edgar/data/886982/...</a></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-label">More real transcripts</div>
+    <h2>All four agents, in their own words</h2>
+    <p class="section-dek">Not cherry-picked for success — the middle example is the system correctly declining to
+      guess a number it didn't have, rather than hallucinating one.</p>
+    <div class="example-grid">
+      <div class="ex-card">
+        <div class="ex-agent">filing_qa</div>
+        <div class="ex-q">"What was Apple's R&amp;D spending in fiscal 2024?"</div>
+        <div class="ex-a">"I cannot answer this question [from the excerpts]. They include capitalized R&amp;D for
+          deferred tax purposes ($10,739M in 2024)... but do not disclose Apple's actual R&amp;D expense as reported
+          on the income statement."</div>
+        <div class="ex-cite">AAPL · Financial Statements · 2024-11-01</div>
+      </div>
+      <div class="ex-card">
+        <div class="ex-agent">summarization</div>
+        <div class="ex-q">"What is Costco's core business?"</div>
+        <div class="ex-a">"Costco... operating 914 warehouses across 14 countries as of fiscal 2025 (up from 890 in
+          2024)... total paid memberships reaching 81 million... Executive members now 38.7 million, representing
+          73.6% of worldwide net sales..."</div>
+        <div class="ex-cite">COST · Business · 2025-10-08</div>
+      </div>
+      <div class="ex-card">
+        <div class="ex-agent">comparison</div>
+        <div class="ex-q">"Compare Walmart, Costco, and Target on competition in retail."</div>
+        <div class="ex-a">"Costco... explicitly calls out Walmart, Target, Kroger, and Amazon by name, and specifically
+          names Sam's Club and BJ's... Walmart's 2026 filing is new in emphasizing AI-powered competitive tools..."</div>
+        <div class="ex-cite">WMT · COST · TGT · multiple sections</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">How it works</div>
+    <h2>One router, four specialists</h2>
+    <p class="section-dek">The LLM proposes an agent and its arguments; deterministic Python retrieves and dispatches. Each agent has a narrow, explicit input schema — not a free-form prompt.</p>
+    <div class="agent-grid">
+      <div class="agent-card"><div class="tag">filing_qa</div><h3>Filing Q&amp;A</h3><p>Direct question against one company. Search filtered to that ticker.</p></div>
+      <div class="agent-card"><div class="tag">comparison</div><h3>Comparison</h3><p>Metric or disclosure compared across companies or periods.</p></div>
+      <div class="agent-card"><div class="tag">risk_flag</div><h3>Risk / Red-Flag</h3><p>Risk-factor language, surfaced from the filing's Item 1A section.</p></div>
+      <div class="agent-card"><div class="tag">summarization</div><h3>Summarization</h3><p>Executive summary of one section — full coverage, not similarity search.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">Proof, not vibes</div>
+    <h2>Measured against a 24-case labeled eval set</h2>
+    <p class="section-dek">Routing accuracy and four RAGAS-methodology metrics — faithfulness, answer relevancy, context precision, context recall — scored by an LLM judge and logged to MLflow.</p>
+    <div class="stat-row">
+      <div class="stat"><div class="n">0.79</div><div class="l">Routing acc.</div></div>
+      <div class="stat"><div class="n">0.66</div><div class="l">Faithfulness</div></div>
+      <div class="stat"><div class="n">0.79</div><div class="l">Relevancy</div></div>
+      <div class="stat"><div class="n">0.54</div><div class="l">Precision</div></div>
+      <div class="stat"><div class="n">0.86</div><div class="l">Recall</div></div>
+    </div>
+    <div class="chip-row">
+      <span class="chip">LangGraph</span><span class="chip">Claude Sonnet 5</span><span class="chip">FAISS</span>
+      <span class="chip">Pinecone</span><span class="chip">FastAPI</span><span class="chip">AWS Lambda</span>
+      <span class="chip">MLflow</span><span class="chip">Docker</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">Run it yourself</div>
+    <h2>Fully open source</h2>
+    <p class="section-dek">Clone it, add your own Anthropic key, and it runs — locally or redeployed to AWS with the same commands used to build this project.</p>
+    <div class="run-box"><span class="c1">git clone</span> https://github.com/SriVamshiPolela/finsight-rag.git
+<span class="c1">cd</span> finsight-rag <span class="c1">&amp;&amp;</span> pip install -r requirements.txt
+<span class="c1">cp</span> .env.example .env  <span class="c1"># add your ANTHROPIC_API_KEY</span>
+<span class="c2">PYTHONPATH=src python -m uvicorn finsight.api.app:app --reload</span></div>
+  </section>
+
+  <footer>
+    <div class="f-left">FinSight RAG — SEC filing intelligence, multi-agent RAG. Portfolio project.</div>
+    <div class="f-links">
+      <a href="https://github.com/SriVamshiPolela/finsight-rag" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/SriVamshiPolela/finsight-rag#readme" target="_blank" rel="noopener">README</a>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

@@ -97,7 +97,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="kicker"><span class="dot"></span> Live · calls the deployed AWS Lambda directly</div>
+    <div class="kicker"><span class="dot"></span> Calls a running instance directly · point ENDPOINT at localhost or a redeployed AWS URL</div>
     <h1>FinSight RAG — Live Demo</h1>
     <p class="dek">Ask about AAPL, MSFT, NVDA, JPM, GS, WMT, COST, or TGT. A router picks the right specialist agent
       and answers from real 10-K filings, with citations. See the <a href="https://github.com/SriVamshiPolela/finsight-rag" target="_blank" rel="noopener">source on GitHub</a>.</p>
@@ -124,14 +124,16 @@
   </div>
 
   <footer>
-    <span>Endpoint: <code>lambda-url.us-east-2.on.aws</code> · AWS Lambda, no auth</span>
-    <a href="https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/filings" target="_blank" rel="noopener">/filings</a>
+    <span>Endpoint: <code id="endpointLabel">http://localhost:8000</code> · point ENDPOINT in the script at any running instance</span>
+    <a href="https://github.com/SriVamshiPolela/finsight-rag" target="_blank" rel="noopener">GitHub</a>
   </footer>
 </div>
 
 <script>
 (function () {
-  var ENDPOINT = "https://f6clgh5gp5wsg4ty3hb4qqezxe0rtwho.lambda-url.us-east-2.on.aws/query";
+  // No AWS deployment is currently live (see README) - point this at a
+  // locally running `uvicorn finsight.api.app:app`, or a redeployed AWS URL.
+  var ENDPOINT = "http://localhost:8000/query";
   var form = document.getElementById("askForm");
   var input = document.getElementById("askInput");
   var btn = document.getElementById("askBtn");
